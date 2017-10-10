@@ -46,6 +46,7 @@
 #define IDM_RECONF    0x0050
 #define IDM_CLRSB     0x0060
 #define IDM_RESET     0x0070
+#define IDM_AUTORECONNECT 0x0080
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -113,7 +114,7 @@ static int font_width, font_height, font_dualwidth, font_varpitch;
 static int offset_width, offset_height;
 static int was_zoomed = 0;
 static int prev_rows, prev_cols;
-  
+
 static void flash_window(int mode);
 static void sys_cursor_update(void);
 static int get_fullscreen_rect(RECT * ss);
@@ -228,6 +229,9 @@ static UINT wm_mousewheel = WM_MOUSEWHEEL;
     (((wch) >= 0x180B && (wch) <= 0x180D) || /* MONGOLIAN FREE VARIATION SELECTOR */ \
      ((wch) >= 0xFE00 && (wch) <= 0xFE0F)) /* VARIATION SELECTOR 1-16 */
 
+static ACCEL acce_keys[] = { { FVIRTKEY , VK_F11, IDM_RESTART } };
+static HACCEL hAccel;
+static int auto_reconnect = 0;
 const int share_can_be_downstream = TRUE;
 const int share_can_be_upstream = TRUE;
 
@@ -344,8 +348,10 @@ static void close_session(void *ignored_context)
     for (i = 0; i < lenof(popup_menus); i++) {
 	DeleteMenu(popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
 	InsertMenu(popup_menus[i].menu, IDM_DUPSESS, MF_BYCOMMAND | MF_ENABLED,
-		   IDM_RESTART, "&Restart Session");
+		   IDM_RESTART, "&Restart Session\tF11");
     }
+	if (auto_reconnect)
+		PostMessage(hwnd, WM_COMMAND, IDM_RESTART, 0);
 }
 
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
@@ -388,7 +394,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      * using instead.
      */
     if (osVersion.dwMajorVersion < 4 ||
-	(osVersion.dwMajorVersion == 4 && 
+	(osVersion.dwMajorVersion == 4 &&
 	 osVersion.dwPlatformId != VER_PLATFORM_WIN32_NT))
 	wm_mousewheel = RegisterWindowMessage("MSWHEEL_ROLLMSG");
 
@@ -501,7 +507,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	     */
 	    int argc, i;
 	    char **argv;
-	    
+
 	    split_into_argv(cmdline, &argc, &argv, NULL);
 
 	    for (i = 0; i < argc; i++) {
@@ -639,7 +645,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
              */
             {
                 char *c = host_strchr(host, ':');
- 
+
                 if (c) {
                     char *d = host_strchr(c+1, ':');
                     if (!d)
@@ -802,7 +808,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     lastact = MA_NOTHING;
     lastbtn = MBT_NOTHING;
     dbltime = GetDoubleClickTime();
-
+	hAccel = CreateAcceleratorTable(acce_keys, sizeof(acce_keys) / sizeof(acce_keys[0]));
     /*
      * Set up the session-control options on the system menu.
      */
@@ -827,7 +833,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
 	    AppendMenu(m, MF_ENABLED, IDM_NEWSESS, "Ne&w Session...");
 	    AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "&Duplicate Session");
-	    AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR) savedsess_menu,
+		AppendMenu(m, MF_ENABLED, IDM_AUTORECONNECT, "Auto Reconnect");
+		AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR) savedsess_menu,
 		       "Sa&ved Sessions");
 	    AppendMenu(m, MF_ENABLED, IDM_RECONF, "Chan&ge Settings...");
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
@@ -919,6 +926,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
 	    if (msg.message == WM_QUIT)
 		goto finished;	       /* two-level break */
+
+		//only translate accelerate key on session closed
+		if (session_closed && TranslateAccelerator(hwnd, hAccel, &msg))
+			continue;
 
 	    if (!(IsWindow(logbox) && IsDialogMessage(logbox, &msg)))
 		DispatchMessageW(&msg);
@@ -1164,7 +1175,8 @@ void connection_fatal(void *frontend, const char *fmt, ...)
     stuff = dupvprintf(fmt, ap);
     va_end(ap);
     sprintf(morestuff, "%.70s Fatal Error", appname);
-    MessageBox(hwnd, stuff, morestuff, MB_ICONERROR | MB_OK);
+	if (!auto_reconnect)
+		MessageBox(hwnd, stuff, morestuff, MB_ICONERROR | MB_OK);
     sfree(stuff);
 
     if (conf_get_int(conf, CONF_close_on_exit) == FORCE_ON)
@@ -1457,7 +1469,7 @@ static int get_font_width(HDC hdc, const TEXTMETRIC *tm)
  *
  * - verify that the bold font is the same width as the ordinary
  *   one, and engage shadow bolding if not.
- * 
+ *
  * - verify that the underlined font is the same width as the
  *   ordinary one (manual underlining by means of line drawing can
  *   be done in a pinch).
@@ -1765,8 +1777,8 @@ void request_resize(void *frontend, int w, int h)
 
 static void reset_window(int reinit) {
     /*
-     * This function decides how to resize or redraw when the 
-     * user changes something. 
+     * This function decides how to resize or redraw when the
+     * user changes something.
      *
      * This function doesn't like to change the terminal size but if the
      * font size is locked that may be it's only soluion.
@@ -1805,7 +1817,7 @@ static void reset_window(int reinit) {
 	return;
 
     /* Is the window out of position ? */
-    if ( !reinit && 
+    if ( !reinit &&
 	    (offset_width != (win_width-font_width*term->cols)/2 ||
 	     offset_height != (win_height-font_height*term->rows)/2) ){
 	offset_width = (win_width-font_width*term->cols)/2;
@@ -1825,7 +1837,7 @@ static void reset_window(int reinit) {
 	extra_height = wr.bottom - wr.top - cr.bottom + cr.top;
 
 	if (resize_action != RESIZE_TERM) {
-	    if (font_width != win_width/term->cols || 
+	    if (font_width != win_width/term->cols ||
 		font_height != win_height/term->rows) {
 		deinit_fonts();
 		init_fonts(win_width/term->cols, win_height/term->rows);
@@ -1838,9 +1850,9 @@ static void reset_window(int reinit) {
 #endif
 	    }
 	} else {
-	    if (font_width * term->cols != win_width || 
+	    if (font_width * term->cols != win_width ||
 		font_height * term->rows != win_height) {
-		/* Our only choice at this point is to change the 
+		/* Our only choice at this point is to change the
 		 * size of the terminal; Oh well.
 		 */
 		term_size(term, win_height/font_height, win_width/font_width,
@@ -1875,8 +1887,8 @@ static void reset_window(int reinit) {
 	     * allowed window size, we will then be back in here and resize
 	     * the font or terminal to fit.
 	     */
-	    SetWindowPos(hwnd, NULL, 0, 0, 
-		         font_width*term->cols + extra_width, 
+	    SetWindowPos(hwnd, NULL, 0, 0,
+		         font_width*term->cols + extra_width,
 			 font_height*term->rows + extra_height,
 			 SWP_NOMOVE | SWP_NOZORDER);
 	}
@@ -1885,7 +1897,7 @@ static void reset_window(int reinit) {
 	return;
     }
 
-    /* Okay the user doesn't want us to change the font so we try the 
+    /* Okay the user doesn't want us to change the font so we try the
      * window. But that may be too big for the screen which forces us
      * to change the terminal.
      */
@@ -1901,7 +1913,7 @@ static void reset_window(int reinit) {
 
 	    static RECT ss;
 	    int width, height;
-		
+
 		get_fullscreen_rect(&ss);
 
 	    width = (ss.right - ss.left - extra_width) / font_width;
@@ -1934,9 +1946,9 @@ static void reset_window(int reinit) {
 #endif
 		}
 	    }
-	    
-	    SetWindowPos(hwnd, NULL, 0, 0, 
-		         font_width*term->cols + extra_width, 
+
+	    SetWindowPos(hwnd, NULL, 0, 0,
+		         font_width*term->cols + extra_width,
 			 font_height*term->rows + extra_height,
 			 SWP_NOMOVE | SWP_NOZORDER);
 
@@ -1952,11 +1964,11 @@ static void reset_window(int reinit) {
 
     /* We're allowed to or must change the font but do we want to ?  */
 
-    if (font_width != (win_width-window_border*2)/term->cols || 
+    if (font_width != (win_width-window_border*2)/term->cols ||
 	font_height != (win_height-window_border*2)/term->rows) {
 
 	deinit_fonts();
-	init_fonts((win_width-window_border*2)/term->cols, 
+	init_fonts((win_width-window_border*2)/term->cols,
 		   (win_height-window_border*2)/term->rows);
 	offset_width = (win_width-font_width*term->cols)/2;
 	offset_height = (win_height-font_height*term->rows)/2;
@@ -1966,7 +1978,7 @@ static void reset_window(int reinit) {
 
 	InvalidateRect(hwnd, NULL, TRUE);
 #ifdef RDB_DEBUG_PATCH
-	debug((25, "reset_window() -> font resize to (%d,%d)", 
+	debug((25, "reset_window() -> font resize to (%d,%d)",
 		   font_width, font_height));
 #endif
     }
@@ -2245,7 +2257,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	    }
 
 	    break;
-	  case IDM_RECONF:
+	    case IDM_AUTORECONNECT:
+	    {
+		    int i = 0;
+		    auto_reconnect = !auto_reconnect;
+		    for (i = 0; i < lenof(popup_menus); i++)
+		  	  CheckMenuItem(popup_menus[i].menu, IDM_AUTORECONNECT, auto_reconnect ? MF_CHECKED : MF_UNCHECKED);
+	    }
+	    break;
+		case IDM_RECONF:
 	    {
 		Conf *prev_conf;
 		int init_lvl = 1;
@@ -2282,7 +2302,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 		    int i;
 		    for (i = 0; i < lenof(popup_menus); i++)
 			EnableMenuItem(popup_menus[i].menu, IDM_FULLSCREEN,
-				       MF_BYCOMMAND | 
+				       MF_BYCOMMAND |
 				       (resize_action == RESIZE_DISABLED)
 				       ? MF_GRAYED : MF_ENABLED);
 		    /* Gracefully unzoom if necessary */
@@ -2699,7 +2719,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	     * pending terminal update: just mark the relevant
 	     * character cells as INVALID and wait for the
 	     * scheduled full update to sort it out.
-	     * 
+	     *
 	     * I have a suspicion this isn't the _right_ solution.
 	     * An alternative approach would be to have terminal.c
 	     * separately track what _should_ be on the terminal
@@ -2713,7 +2733,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	     * current terminal appearance so that WM_PAINT becomes
 	     * completely trivial. However, this should do for now.
 	     */
-	    term_paint(term, hdc, 
+	    term_paint(term, hdc,
 		       (p.rcPaint.left-offset_width)/font_width,
 		       (p.rcPaint.top-offset_height)/font_height,
 		       (p.rcPaint.right-offset_width-1)/font_width,
@@ -2731,7 +2751,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 		fillcolour = CreateSolidBrush (
 				    colours[ATTR_DEFBG>>ATTR_BGSHIFT]);
 		oldbrush = SelectObject(hdc, fillcolour);
-		edge = CreatePen(PS_SOLID, 0, 
+		edge = CreatePen(PS_SOLID, 0,
 				    colours[ATTR_DEFBG>>ATTR_BGSHIFT]);
 		oldpen = SelectObject(hdc, edge);
 
@@ -2746,12 +2766,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 			p.rcPaint.left, p.rcPaint.top,
 			p.rcPaint.right, p.rcPaint.bottom);
 
-		ExcludeClipRect(hdc, 
+		ExcludeClipRect(hdc,
 			offset_width, offset_height,
 			offset_width+font_width*term->cols,
 			offset_height+font_height*term->rows);
 
-		Rectangle(hdc, p.rcPaint.left, p.rcPaint.top, 
+		Rectangle(hdc, p.rcPaint.left, p.rcPaint.top,
 			  p.rcPaint.right, p.rcPaint.bottom);
 
 		/* SelectClipRgn(hdc, NULL); */
@@ -2834,10 +2854,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	    if (!need_backend_resize && resize_action == RESIZE_EITHER &&
 		(conf_get_int(conf, CONF_height) != term->rows ||
 		 conf_get_int(conf, CONF_width) != term->cols)) {
-		/* 
+		/*
 		 * Great! It seems that both the terminal size and the
 		 * font size have been changed and the user is now dragging.
-		 * 
+		 *
 		 * It will now be difficult to get back to the configured
 		 * font size!
 		 *
@@ -3176,7 +3196,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	    int n;
 	    char *buff;
 
-	    if(osVersion.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS || 
+	    if(osVersion.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS ||
 	        osVersion.dwPlatformId == VER_PLATFORM_WIN32s) break; /* no Unicode */
 
 	    if ((lParam & GCS_RESULTSTR) == 0) /* Composition unfinished. */
@@ -3384,7 +3404,7 @@ static void sys_cursor_update(void)
 
     /* IMM calls on Win98 and beyond only */
     if(osVersion.dwPlatformId == VER_PLATFORM_WIN32s) return; /* 3.11 */
-    
+
     if(osVersion.dwPlatformId == VER_PLATFORM_WIN32_WINDOWS &&
 	    osVersion.dwMinorVersion == 0) return; /* 95 */
 
@@ -3731,7 +3751,7 @@ void do_text_internal(Context ctx, int x, int y, wchar_t *text, int len,
                  * can leave 'droppings' even with the clip box! I
                  * suppose I could loop it one character at a time ...
                  * yuk.
-                 * 
+                 *
                  * Or ... I could do a test print with "W", and use +1
                  * or -1 for this shift depending on if the leftmost
                  * column is blank...
@@ -4668,7 +4688,7 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
 	    alt_sum = 0;
     }
 
-    /* Okay we've done everything interesting; let windows deal with 
+    /* Okay we've done everything interesting; let windows deal with
      * the boring stuff */
     {
 	BOOL capsOn=0;
@@ -5120,7 +5140,7 @@ void write_clip(void *frontend, wchar_t * data, int *attr, int len, int must_des
 	 * looked up in `unitab', we just copy straight over from
 	 * tdata. For each one that doesn't, we must WCToMB it
 	 * individually and produce a \u escape sequence.
-	 * 
+	 *
 	 * It would probably be more robust to just bite the bullet
 	 * and WCToMB each individual Unicode character one by one,
 	 * then MBToWC each one back to see if it was an accurate
@@ -5180,7 +5200,7 @@ void write_clip(void *frontend, wchar_t * data, int *attr, int len, int must_des
 		    attrBold  = attr[tindex] & ATTR_BOLD;
 		else
 		    attrBold  = 0;
-                
+
 		attrUnder = attr[tindex] & ATTR_UNDER;
 
                 /*
@@ -5635,7 +5655,7 @@ void set_iconic(void *frontend, int iconic)
 void move_window(void *frontend, int x, int y)
 {
     int resize_action = conf_get_int(conf, CONF_resize_action);
-    if (resize_action == RESIZE_DISABLED || 
+    if (resize_action == RESIZE_DISABLED ||
 	resize_action == RESIZE_FONT ||
 	IsZoomed(hwnd))
        return;
@@ -5748,7 +5768,7 @@ static int get_fullscreen_rect(RECT * ss)
 	ss->left = ss->top = 0;
 	ss->right = GetSystemMetrics(SM_CXSCREEN);
 	ss->bottom = GetSystemMetrics(SM_CYSCREEN);
-*/ 
+*/
 	return GetClientRect(GetDesktopWindow(), ss);
 #endif
 }
@@ -5767,7 +5787,7 @@ static void make_full_screen()
 
 	if (is_full_screen())
 		return;
-	
+
     /* Remove the window furniture. */
     style = GetWindowLongPtr(hwnd, GWL_STYLE);
     style &= ~(WS_CAPTION | WS_BORDER | WS_THICKFRAME);
