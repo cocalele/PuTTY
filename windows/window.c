@@ -47,6 +47,8 @@
 #define IDM_CLRSB     0x0060
 #define IDM_RESET     0x0070
 #define IDM_AUTORECONNECT 0x0080
+#define IDM_THEMEDARK 0x0090
+#define IDM_THEMELIGHT 0x00a0
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -118,6 +120,8 @@ static int prev_rows, prev_cols;
 static void flash_window(int mode);
 static void sys_cursor_update(void);
 static int get_fullscreen_rect(RECT * ss);
+static void set_theme_light();
+static void set_theme_dark();
 
 static int caret_x = -1, caret_y = -1;
 
@@ -834,6 +838,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	    AppendMenu(m, MF_ENABLED, IDM_NEWSESS, "Ne&w Session...");
 	    AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "&Duplicate Session");
 		AppendMenu(m, MF_ENABLED, IDM_AUTORECONNECT, "Auto Reconnect");
+		AppendMenu(m, MF_ENABLED, IDM_THEMEDARK, "Theme Dark");
+		AppendMenu(m, MF_ENABLED, IDM_THEMELIGHT, "Theme Light");
 		AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR) savedsess_menu,
 		       "Sa&ved Sessions");
 	    AppendMenu(m, MF_ENABLED, IDM_RECONF, "Chan&ge Settings...");
@@ -2265,6 +2271,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 		  	  CheckMenuItem(popup_menus[i].menu, IDM_AUTORECONNECT, auto_reconnect ? MF_CHECKED : MF_UNCHECKED);
 	    }
 	    break;
+		case IDM_THEMELIGHT:
+		{
+			set_theme_light();
+		}
+		break;
+		case IDM_THEMEDARK:
+		{
+			set_theme_dark();
+		}
+		break;
 		case IDM_RECONF:
 	    {
 		Conf *prev_conf;
@@ -5908,4 +5924,44 @@ void agent_schedule_callback(void (*callback)(void *, void *, int),
     c->data = data;
     c->len = len;
     PostMessage(hwnd, WM_AGENT_CALLBACK, 0, (LPARAM)c);
+}
+
+#define COLOR_IDX_DEFAULT_FOREGROUND 0
+#define COLOR_IDX_DEFAULT_BACKGROUND 2
+
+static void set_color(int color_index, int color_bbggrr)
+{
+	conf_set_int_int(conf, CONF_colours, color_index * 3 + 0, color_bbggrr&0x00ff);
+	conf_set_int_int(conf, CONF_colours, color_index * 3 + 1, (color_bbggrr>>8) & 0x00ff);
+	conf_set_int_int(conf, CONF_colours, color_index * 3 + 2, (color_bbggrr >> 16) & 0x00ff);
+
+}
+static void set_theme_light()
+{
+	set_color(COLOR_IDX_DEFAULT_BACKGROUND, 0x00ffffff);
+	set_color(COLOR_IDX_DEFAULT_FOREGROUND, 0x00000000);
+
+	conftopalette();
+	init_palette();
+
+	/* Pass new config data to the terminal */
+	term_reconfig(term, conf);
+	InvalidateRect(hwnd, NULL, TRUE);
+	reset_window(1);
+
+}
+
+static void set_theme_dark()
+{
+	set_color(COLOR_IDX_DEFAULT_BACKGROUND, 0x00000000);
+	set_color(COLOR_IDX_DEFAULT_FOREGROUND, 0x00cccccc);
+
+	conftopalette();
+	init_palette();
+
+	/* Pass new config data to the terminal */
+	term_reconfig(term, conf);
+	InvalidateRect(hwnd, NULL, TRUE);
+	reset_window(1);
+
 }
