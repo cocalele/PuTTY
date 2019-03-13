@@ -93,7 +93,7 @@ static Mouse_Button translate_button(Mouse_Button button);
 static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
 			unsigned char *output);
-static void conftopalette(void);
+static void conftopalette(int bRevert);
 static void systopalette(void);
 static void init_palette(void);
 static void init_fonts(int, int);
@@ -695,7 +695,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 
     conf_cache_data();
 
-    conftopalette();
+    conftopalette(0);
 
     /*
      * Guess some defaults for the window size. This all gets
@@ -1223,7 +1223,7 @@ static void wm_netevent_callback(void *vctx)
  * Copy the colour palette from the configuration data into defpal.
  * This is non-trivial because the colour indices are different.
  */
-static void conftopalette(void)
+static void conftopalette(int bRevert)
 {
     int i;
     static const int ww[] = {
@@ -1234,9 +1234,9 @@ static void conftopalette(void)
 
     for (i = 0; i < 22; i++) {
 	int w = ww[i];
-	defpal[w].rgbtRed = conf_get_int_int(conf, CONF_colours, i*3+0);
-	defpal[w].rgbtGreen = conf_get_int_int(conf, CONF_colours, i*3+1);
-	defpal[w].rgbtBlue = conf_get_int_int(conf, CONF_colours, i*3+2);
+	defpal[w].rgbtRed = conf_get_int_int(conf, CONF_colours, i*3+0) ^ (bRevert ? 0xff : 0);
+	defpal[w].rgbtGreen = conf_get_int_int(conf, CONF_colours, i*3+1) ^ (bRevert ? 0xff : 0);
+	defpal[w].rgbtBlue = conf_get_int_int(conf, CONF_colours, i*3+2) ^ (bRevert ? 0xff : 0);
     }
     for (i = 0; i < NEXTCOLOURS; i++) {
 	if (i < 216) {
@@ -2342,7 +2342,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 		    DeleteObject(pal);
 		logpal = NULL;
 		pal = NULL;
-		conftopalette();
+		conftopalette(0);
 		init_palette();
 
 		/* Pass new config data to the terminal */
@@ -5938,10 +5938,10 @@ static void set_color(int color_index, int color_bbggrr)
 }
 static void set_theme_light()
 {
-	set_color(COLOR_IDX_DEFAULT_BACKGROUND, 0x00ffffff);
-	set_color(COLOR_IDX_DEFAULT_FOREGROUND, 0x00000000);
+//	set_color(COLOR_IDX_DEFAULT_BACKGROUND, 0x00ffffff);
+//	set_color(COLOR_IDX_DEFAULT_FOREGROUND, 0x00000000);
 
-	conftopalette();
+	conftopalette(1);
 	init_palette();
 
 	/* Pass new config data to the terminal */
@@ -5956,7 +5956,7 @@ static void set_theme_dark()
 	set_color(COLOR_IDX_DEFAULT_BACKGROUND, 0x00000000);
 	set_color(COLOR_IDX_DEFAULT_FOREGROUND, 0x00cccccc);
 
-	conftopalette();
+	conftopalette(0);
 	init_palette();
 
 	/* Pass new config data to the terminal */
