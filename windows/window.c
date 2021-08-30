@@ -47,6 +47,9 @@
 #define IDM_RECONF    0x0050
 #define IDM_CLRSB     0x0060
 #define IDM_RESET     0x0070
+#define IDM_AUTORECONNECT 0x0080
+#define IDM_THEMEDARK 0x0090
+#define IDM_THEMELIGHT 0x00a0
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -128,6 +131,8 @@ static int prev_rows, prev_cols;
 static void flash_window(int mode);
 static void sys_cursor_update(void);
 static bool get_fullscreen_rect(RECT * ss);
+static void set_theme_light();
+static void set_theme_dark();
 
 static int caret_x = -1, caret_y = -1;
 
@@ -236,6 +241,9 @@ static UINT wm_mousewheel = WM_MOUSEWHEEL;
 #define IS_LOW_VARSEL(wch) \
     (((wch) >= 0x180B && (wch) <= 0x180D) || /* MONGOLIAN FREE VARIATION SELECTOR */ \
      ((wch) >= 0xFE00 && (wch) <= 0xFE0F)) /* VARIATION SELECTOR 1-16 */
+static ACCEL acce_keys[] = { { FVIRTKEY , VK_F11, IDM_RESTART } };
+static HACCEL hAccel;
+static int auto_reconnect = 0;
 
 static bool wintw_setup_draw_ctx(TermWin *);
 static void wintw_draw_text(TermWin *, int x, int y, wchar_t *text, int len,
@@ -451,8 +459,10 @@ static void close_session(void *ignored_context)
     for (i = 0; i < lenof(popup_menus); i++) {
         DeleteMenu(popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
         InsertMenu(popup_menus[i].menu, IDM_DUPSESS, MF_BYCOMMAND | MF_ENABLED,
-                   IDM_RESTART, "&Restart Session");
+                   IDM_RESTART, "&Restart Session\tF11");
     }
+	if (auto_reconnect)
+		PostMessage(wgs.term_hwnd, WM_COMMAND, IDM_RESTART, 0);
 }
 
 const unsigned cmdline_tooltype =
@@ -818,6 +828,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     lastact = MA_NOTHING;
     lastbtn = MBT_NOTHING;
     dbltime = GetDoubleClickTime();
+	hAccel = CreateAcceleratorTable(acce_keys, sizeof(acce_keys) / sizeof(acce_keys[0]));
 
     /*
      * Set up the session-control options on the system menu.
@@ -844,6 +855,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             AppendMenu(m, MF_SEPARATOR, 0, 0);
             AppendMenu(m, MF_ENABLED, IDM_NEWSESS, "Ne&w Session...");
             AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "&Duplicate Session");
+			AppendMenu(m, MF_ENABLED, IDM_AUTORECONNECT, "Auto Reconnect");
+			AppendMenu(m, MF_ENABLED, IDM_THEMEDARK, "Theme Dark");
+			AppendMenu(m, MF_ENABLED, IDM_THEMELIGHT, "Theme Light");
             AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR) savedsess_menu,
                        "Sa&ved Sessions");
             AppendMenu(m, MF_ENABLED, IDM_RECONF, "Chan&ge Settings...");
@@ -930,6 +944,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT)
                 goto finished;         /* two-level break */
+		    //only translate accelerate key on session closed
+			if (session_closed && TranslateAccelerator(wgs.term_hwnd, hAccel, &msg))
+				continue;
 
             HWND logbox = event_log_window();
             if (!(IsWindow(logbox) && IsDialogMessage(logbox, &msg)))
@@ -1167,7 +1184,8 @@ static void win_seat_connection_fatal(Seat *seat, const char *msg)
 {
     char *title = dupprintf("%s Fatal Error", appname);
     show_mouseptr(true);
-    MessageBox(wgs.term_hwnd, msg, title, MB_ICONERROR | MB_OK);
+    if (!auto_reconnect)
+        MessageBox(wgs.term_hwnd, msg, title, MB_ICONERROR | MB_OK);
     sfree(title);
 
     if (conf_get_int(conf, CONF_close_on_exit) == FORCE_ON)
@@ -2341,6 +2359,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
                 start_backend();
             }
 
+            break;
+            case IDM_AUTORECONNECT:
+            {
+	            int i = 0;
+	            auto_reconnect = !auto_reconnect;
+	            for (i = 0; i < lenof(popup_menus); i++)
+		            CheckMenuItem(popup_menus[i].menu, IDM_AUTORECONNECT, auto_reconnect ? MF_CHECKED : MF_UNCHECKED);
+            }
+            break;
+            case IDM_THEMELIGHT:
+            {
+	            set_theme_light();
+            }
+            break;
+            case IDM_THEMEDARK:
+            {
+	            set_theme_dark();
+            }
             break;
           case IDM_RECONF: {
             Conf *prev_conf;
@@ -5857,4 +5893,18 @@ static bool win_seat_get_window_pixel_size(Seat *seat, int *x, int *y)
     *x = r.right - r.left;
     *y = r.bottom - r.top;
     return true;
+}
+
+static void set_theme_light()
+{
+    colorref_modifier = RGB(255, 255, 255);
+    term->win_palette_pending = true;
+    term_update(term);
+}
+
+static void set_theme_dark()
+{
+	colorref_modifier = RGB(0, 0, 0);
+    term->win_palette_pending = true;
+    term_update(term);
 }
