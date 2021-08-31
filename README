@@ -1,3 +1,8 @@
+这是基于原Putty 0.76版本的一个增强。增加功能包括：
+- 快捷键F11，用于在连接异常断开后快速reconnect
+- 自动重连
+- lightmode, darkmode两种模式快速切换
+
 This is the README for the source archive of PuTTY, a free Windows
 and Unix Telnet and SSH client.
 
