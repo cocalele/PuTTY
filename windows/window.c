@@ -10,7 +10,6 @@
 #include <limits.h>
 #include <assert.h>
 #include <wchar.h>
-
 #define COMPILE_MULTIMON_STUBS
 
 #include "putty.h"
@@ -30,6 +29,7 @@
 #include <commctrl.h>
 #include <richedit.h>
 #include <mmsystem.h>
+//#include <shlwapi.h> //for StrStrNIW
 
 /* From MSDN: In the WM_SYSCOMMAND message, the four low-order bits of
  * wParam are used by Windows, and should be masked off, so we shouldn't
@@ -207,6 +207,41 @@ static HICON trust_icon = INVALID_HANDLE_VALUE;
 
 const bool share_can_be_downstream = true;
 const bool share_can_be_upstream = true;
+
+
+
+static int strncasecmp(const char*  s1, const char*  s2, size_t n)
+{
+    const unsigned char* ucs1 = (const unsigned char*) s1;
+    const unsigned char* ucs2 = (const unsigned char*) s2;
+	int d = 0;
+	for (; n != 0; n--)
+	{
+        const int c1 = tolower(*ucs1++);
+        const int c2 = tolower(*ucs2++);
+		if (((d = c1 - c2) != 0) || (c2 == '\0'))
+			break;
+	}
+	return d;
+}
+static char* strcasestr(const char* s, const char* find)
+{
+	char c, sc;
+	size_t len;
+
+	if ((c = *find++) != 0) {
+		c = tolower((unsigned char)c);
+		len = strlen(find);
+		do {
+			do {
+				if ((sc = *s++) == 0)
+					return (NULL);
+			} while ((char)tolower((unsigned char)sc) != c);
+		} while (strncasecmp(s, find, len) != 0);
+		s--;
+	}
+	return ((char*)s);
+}
 
 static bool is_utf8(WinGuiSeat *wgs)
 {
@@ -759,7 +794,10 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     UpdateWindow(wgs->term_hwnd);
 
     gui_terminal_ready(wgs->term_hwnd, &wgs->seat, wgs->backend);
-
+	//AllocConsole();
+	//FILE* stream;
+	//freopen_s(&stream, "CON", "r", stdin);//重定向输入流
+	//freopen_s(&stream, "CON", "w", stdout);//重定向输入流
     while (1) {
         int n;
         DWORD timeout;
@@ -1274,7 +1312,6 @@ static void general_textout(
     bool got_bkmode = false;
 
     xp = xn = x;
-
     for (i = 0; i < (int)cbCount ;) {
         bool rtl = is_rtl(lpString[i]);
 
@@ -3792,7 +3829,8 @@ static void do_text_internal(
                 }
             }
         }
-
+        static COLORREF color_red = RGB(255, 0, 0);
+		static COLORREF color_yellow = RGB(227, 227, 0);
         /* We're using a private area for direct to font. (512 chars.) */
         if (wgs->ucsdata.dbcs_screenfont &&
             (text[0] & CSET_MASK) == CSET_ACP) {
@@ -3844,7 +3882,17 @@ static void do_text_internal(
             sgrowarray(cbuf, cbuflen, len);
             for (size_t i = 0; i < len; i++)
                 cbuf[i] = text[i] & 0xFF;
+            cbuf[len] = 0;
 
+            //printf("DW:%.*s<\r\n", len, cbuf/*, len, text*/);
+            if(strcasestr(cbuf, "error") || strcasestr(cbuf, "fail") || strcasestr(cbuf, "fatal")){
+                
+                SetTextColor(wgs->wintw_hdc, color_red);
+            }
+			else if (strcasestr(cbuf, "warn") || strcasestr(cbuf, "Exception")) {
+
+				SetTextColor(wgs->wintw_hdc, color_yellow);
+			}
             ExtTextOut(
                 wgs->wintw_hdc, x + xoffset,
                 y - wgs->font_height * (lattr == LATTR_BOT) + text_adjust,
