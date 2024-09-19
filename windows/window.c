@@ -3885,14 +3885,14 @@ static void do_text_internal(
             cbuf[len] = 0;
 
             //printf("DW:%.*s<\r\n", len, cbuf/*, len, text*/);
-            if(strcasestr(cbuf, "error") || strcasestr(cbuf, "fail") || strcasestr(cbuf, "fatal")){
-                
-                SetTextColor(wgs->wintw_hdc, color_red);
-            }
-			else if (strcasestr(cbuf, "warn") || strcasestr(cbuf, "Exception")) {
+   //         if(strcasestr(cbuf, "error") || strcasestr(cbuf, "fail") || strcasestr(cbuf, "fatal")){
+   //             
+   //             SetTextColor(wgs->wintw_hdc, color_red);
+   //         }
+			//else if (strcasestr(cbuf, "warn") || strcasestr(cbuf, "Exception")) {
 
-				SetTextColor(wgs->wintw_hdc, color_yellow);
-			}
+			//	SetTextColor(wgs->wintw_hdc, color_yellow);
+			//}
             ExtTextOut(
                 wgs->wintw_hdc, x + xoffset,
                 y - wgs->font_height * (lattr == LATTR_BOT) + text_adjust,

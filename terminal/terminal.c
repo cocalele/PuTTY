@@ -64,7 +64,7 @@ static const wchar_t sel_nl[] = SEL_NL;
 
 /* forward declaration */
 static void term_userpass_state_free(struct term_userpass_state *s);
-
+void hilhghtLine(struct termchar* linechars, int len);
 /*
  * Fetch the character at a particular position in a line array,
  * for purposes of `wordtype'. The reason this isn't just a simple
@@ -3506,7 +3506,7 @@ static strbuf *term_input_data_from_charset(
         buf = term_input_data_from_unicode(term, widebuf, widelen);
         sfree(widebuf);
     }
-
+    //printf("input from charset %s\n", str);
     return buf;
 }
 
@@ -6214,6 +6214,7 @@ static void do_paint(Terminal *term)
             /* Combining characters are still read from lchars */
             newline[j].cc_next = 0;
         }
+        hilhghtLine(newline, ldata->cols);
 
         /*
          * Now loop over the line again, noting where things have
@@ -7792,6 +7793,7 @@ static void term_added_data(Terminal *term, bool called_from_term_data)
 
 size_t term_data(Terminal *term, const void *data, size_t len)
 {
+//	printf("Term add data:[%s]\n", data);
     bufchain_add(&term->inbuf, data, len);
     term_added_data(term, true);
     return bufchain_size(&term->inbuf);
