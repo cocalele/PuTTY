@@ -43,6 +43,7 @@
 #define IDM_RECONF    0x0050
 #define IDM_CLRSB     0x0060
 #define IDM_RESET     0x0070
+#define IDM_AUTORECONNECT 0x0080
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -204,6 +205,10 @@ static const TermWinVtable windows_termwin_vt = {
 };
 
 static HICON trust_icon = INVALID_HANDLE_VALUE;
+
+static ACCEL acce_keys[] = { { FVIRTKEY , VK_F11, IDM_RESTART } };
+static HACCEL hAccel;
+static int auto_reconnect = 0;
 
 const bool share_can_be_downstream = true;
 const bool share_can_be_upstream = true;
@@ -403,8 +408,11 @@ static void close_session(void *vctx)
     for (i = 0; i < lenof(wgs->popup_menus); i++) {
         DeleteMenu(wgs->popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
         InsertMenu(wgs->popup_menus[i].menu, IDM_DUPSESS,
-                   MF_BYCOMMAND | MF_ENABLED, IDM_RESTART, "&Restart Session");
+                   MF_BYCOMMAND | MF_ENABLED, IDM_RESTART, "&Restart Session\tF11");
     }
+    if (auto_reconnect)
+        PostMessage(wgs->term_hwnd, WM_COMMAND, IDM_RESTART, 0);
+
 }
 
 /*
@@ -725,6 +733,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     wgs->lastbtn = MBT_NOTHING;
     wgs->dbltime = GetDoubleClickTime();
 
+    hAccel = CreateAcceleratorTable(acce_keys, sizeof(acce_keys) / sizeof(acce_keys[0]));
     /*
      * Set up the session-control options on the system menu.
      */
@@ -752,6 +761,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             AppendMenu(m, MF_SEPARATOR, 0, 0);
             AppendMenu(m, MF_ENABLED, IDM_NEWSESS, "Ne&w Session...");
             AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "&Duplicate Session");
+            AppendMenu(m, MF_ENABLED, IDM_AUTORECONNECT, "Auto Reconnect");
+
             AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR)wgs->savedsess_menu,
                        "Sa&ved Sessions");
             AppendMenu(m, MF_ENABLED, IDM_RECONF, "Chan&ge Settings...");
@@ -840,6 +851,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
         while (sw_PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT)
                 goto finished;         /* two-level break */
+			//only translate accelerate key on session closed
+			if (wgs->session_closed && TranslateAccelerator(wgs->term_hwnd, hAccel, &msg))
+			    continue;
 
             HWND logbox = event_log_window();
             if (!(IsWindow(logbox) && IsDialogMessage(logbox, &msg)))
@@ -1174,7 +1188,7 @@ static void win_seat_connection_fatal(Seat *seat, const char *msg)
     WinGuiSeat *wgs = container_of(seat, WinGuiSeat, seat);
     char *title = dupprintf("%s Fatal Error", appname);
     show_mouseptr(wgs, true);
-    MessageBox(wgs->term_hwnd, msg, title, MB_ICONERROR | MB_OK);
+    if (!auto_reconnect) MessageBox(wgs->term_hwnd, msg, title, MB_ICONERROR | MB_OK);
     sfree(title);
 
     if (conf_get_int(wgs->conf, CONF_close_on_exit) == FORCE_ON)
@@ -2380,6 +2394,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             }
 
             break;
+		  case IDM_AUTORECONNECT:
+		  {
+			  int i = 0;
+			  auto_reconnect = !auto_reconnect;
+			  for (i = 0; i < lenof(wgs->popup_menus); i++)
+				  CheckMenuItem(wgs->popup_menus[i].menu, IDM_AUTORECONNECT, auto_reconnect ? MF_CHECKED : MF_UNCHECKED);
+		  }
+		  break;
+
           case IDM_RECONF: {
             Conf *prev_conf;
             int init_lvl = 1;
