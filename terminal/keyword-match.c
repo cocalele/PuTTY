@@ -38,9 +38,10 @@ static void reset_all_state()
 	}
 }
 static void hilight_word(struct termchar* linechars, int start, int length, optionalrgb fg){
-	printf("hilight:%d, len:%d\n", start, length);
+	//printf("hilight:%d, len:%d\n", start, length);
 	for(int i=0;i<length;i++){
 		linechars[start + i].truecolour.fg = fg;
+		//linechars[start + i].attr |= ATTR_INVALID;
 	}
 }
 static void feed_char(struct termchar* linechars, int key_index, const char  letter, int position)
