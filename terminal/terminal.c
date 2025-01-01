@@ -1323,13 +1323,17 @@ static void term_timer(void *ctx, unsigned long now)
 static void term_update_callback(void *ctx)
 {
     Terminal *term = (Terminal *)ctx;
-    if (!term->window_update_pending)
+    if (!term->window_update_pending) {
+        printf("Not update for window_update_pending is false");
         return;
+       }
     if (!term->window_update_cooldown) {
         term_update(term);
         term->window_update_cooldown = true;
         term->window_update_cooldown_end = schedule_timer(
             UPDATE_DELAY, term_timer, term);
+    } else {
+        printf("Not update for cooldown is true");
     }
 }
 

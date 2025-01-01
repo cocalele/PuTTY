@@ -44,6 +44,7 @@
 #define IDM_CLRSB     0x0060
 #define IDM_RESET     0x0070
 #define IDM_AUTORECONNECT 0x0080
+#define IDM_LOGPAINT 0x0090
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -209,6 +210,7 @@ static HICON trust_icon = INVALID_HANDLE_VALUE;
 static ACCEL acce_keys[] = { { FVIRTKEY , VK_F11, IDM_RESTART } };
 static HACCEL hAccel;
 static int auto_reconnect = 0;
+static int logpaint = 0;
 
 const bool share_can_be_downstream = true;
 const bool share_can_be_upstream = true;
@@ -762,6 +764,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
             AppendMenu(m, MF_ENABLED, IDM_NEWSESS, "Ne&w Session...");
             AppendMenu(m, MF_ENABLED, IDM_DUPSESS, "&Duplicate Session");
             AppendMenu(m, MF_ENABLED, IDM_AUTORECONNECT, "Auto Reconnect");
+			AppendMenu(m, MF_ENABLED, IDM_LOGPAINT, "Show windows console");
 
             AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT_PTR)wgs->savedsess_menu,
                        "Sa&ved Sessions");
@@ -2402,6 +2405,21 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 				  CheckMenuItem(wgs->popup_menus[i].menu, IDM_AUTORECONNECT, auto_reconnect ? MF_CHECKED : MF_UNCHECKED);
 		  }
 		  break;
+		  case IDM_LOGPAINT:
+		  {
+			  int i = 0;
+			  logpaint = !logpaint;
+              lp_eventlog(&wgs->logpolicy, "----- logprint toggled -----");
+			  for (i = 0; i < lenof(wgs->popup_menus); i++)
+				  CheckMenuItem(wgs->popup_menus[i].menu, IDM_LOGPAINT, logpaint ? MF_CHECKED : MF_UNCHECKED);
+              if(logpaint){
+				  AllocConsole();
+	              FILE* stream;
+	              freopen_s(&stream, "CON", "r", stdin);//重定向输入流
+	              freopen_s(&stream, "CON", "w", stdout);//重定向输入流
+              }
+		  }
+		  break;
 
           case IDM_RECONF: {
             Conf *prev_conf;
@@ -2876,6 +2894,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
          */
         assert(!wgs->wintw_hdc);
         wgs->wintw_hdc = hdc;
+        if(logpaint){
+            printf("Paint(%d-%d,%d-%d,%d-%d,%d-%d), pending:%d\n",
+                p.rcPaint.left , wgs->offset_width,
+                p.rcPaint.top , wgs->offset_height,
+                p.rcPaint.right , wgs->offset_width - 1,
+                p.rcPaint.bottom , wgs->offset_height - 1, wgs->term->window_update_pending);
+        }
         term_paint(wgs->term,
                    (p.rcPaint.left-wgs->offset_width)/wgs->font_width,
                    (p.rcPaint.top-wgs->offset_height)/wgs->font_height,
